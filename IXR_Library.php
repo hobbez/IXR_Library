@@ -38,6 +38,10 @@
  * @link       http://scripts.incutio.com/xmlrpc/ Site/manual
  *
  * 20210624 rhz Modified to resolve deprecated Class Name::Name()
+ * 20250327 rhz Modified to support HTTP/2 200 return code (without OK), and resolve deprecated:
+ *		- xml_set_object()
+ *		- passing non-callable string to xml_set_element_handler()
+ *		- creation of dynamic property due to incorrect variable name
  * 
  */
 
@@ -209,9 +213,8 @@ class IXR_Message
         // Set XML parser to take the case of tags in to account
         xml_parser_set_option($this->_parser, XML_OPTION_CASE_FOLDING, false);
         // Set XML parser callback functions
-        xml_set_object($this->_parser, $this);
-        xml_set_element_handler($this->_parser, 'tag_open', 'tag_close');
-        xml_set_character_data_handler($this->_parser, 'cdata');
+        xml_set_element_handler($this->_parser, [$this, 'tag_open'], [$this, 'tag_close']);
+        xml_set_character_data_handler($this->_parser, [$this, 'cdata']);
         $chunk_size = 262144; // 256Kb, parse in chunks to avoid the RAM usage on very large messages
         do {
             if (strlen($this->message) <= $chunk_size) {
@@ -239,7 +242,7 @@ class IXR_Message
     function tag_open($parser, $tag, $attr)
     {
         $this->_currentTagContents = '';
-        $this->currentTag = $tag;
+        $this->_currentTag = $tag;
         switch($tag) {
             case 'methodCall':
             case 'methodResponse':
@@ -667,7 +670,7 @@ class IXR_Client
             if (!$gotFirstLine) {
                 // Check line for '200'
                 if (strstr($line, '200') === false) {
-                    $this->error = new IXR_Error(-32300, 'transport error - HTTP status code was not 200');
+                    $this->error = new IXR_Error(-32300, 'transport error - HTTP status code was not 200 (1)');
                     return false;
                 }
                 $gotFirstLine = true;
@@ -1241,9 +1244,9 @@ class IXR_ClientSSL extends IXR_Client
         curl_close($curl);
 
         // Check for 200 Code in $contents
-        if (!strstr($contents, '200 OK')) {
+        if (!strstr($contents, '200 OK') && !strstr($contents, 'HTTP/2 200')) {
             //There was no "200 OK" returned - we failed
-            $this->error = new IXR_Error(-32300, 'transport error - HTTP status code was not 200');
+            $this->error = new IXR_Error(-32300, 'transport error - HTTP status code was not 200 (2)');
             return false;
         }
 
